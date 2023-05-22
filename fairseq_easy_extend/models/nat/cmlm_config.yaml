@@ -1,13 +1,15 @@
 # @package _group_
 task:
   _name: translation_lev
-  data: # /home/admin/Projects/University/NLP2/data/iwslt14.tokenized.de-en # path to data directory
+  data: "" 
   source_lang: de
   target_lang: en
   noise: random_mask
 criterion:
   _name: rl_loss # nat_loss
   sentence_level_metric: bleu 
+  wandb_entity: nrouws                            # optional  
+  wandb_project: nlp_machine_translation_nar_rl   # optional
 model:
   _name: cmlm_transformer_base
   share_decoder_input_output_embed: true
@@ -36,5 +38,5 @@ optimization:
 checkpoint:
   no_epoch_checkpoints: true
 common:
-  log_format: simple
-  log_interval: 100
+  log_format: tqdm 
+  log_interval: 5 

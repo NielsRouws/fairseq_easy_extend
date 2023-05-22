@@ -1,6 +1,8 @@
 import math
 from argparse import Namespace
 
+from typing import Union
+
 import torch
 import torch.nn.functional as F
 
@@ -14,6 +16,8 @@ from fairseq.logging import metrics
 
 from sacrebleu.metrics import BLEU
 
+import wandb
+
 
 @dataclass
 class RLCriterionConfig(FairseqDataclass):
@@ -21,17 +25,31 @@ class RLCriterionConfig(FairseqDataclass):
         default="bleu",
         metadata={"help": "sentence level metric"},
     )
+    wandb_entity: Union[str, None] = field(
+        default=None,
+        metadata={"help": "WANBD entity name"},
+    )
+    wandb_project: str = field(
+        default="nlp_machine_translation_nar_rl",
+        metadata={"help": "WANBD Project name"},
+    )
 
 
 @register_criterion("rl_loss", dataclass=RLCriterionConfig)
 class RLCriterion(FairseqCriterion):
-    def __init__(self, task, sentence_level_metric):
+    def __init__(self, task, sentence_level_metric, wandb_project, wandb_entity):
         super().__init__(task)
         self.metric = sentence_level_metric
         self.tokenizer = encoders.build_tokenizer(Namespace(tokenizer="moses"))
         self.tgt_dict = task.target_dictionary
 
         self.bleu = BLEU(effective_order=True)
+
+        self.run = (
+            wandb.init(project=wandb_project, entity=wandb_entity)
+            if wandb_entity
+            else None
+        )
 
     def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
@@ -68,6 +86,8 @@ class RLCriterion(FairseqCriterion):
             "sample_size": sample_size,
             "reward": reward.detach(),
         }
+        if self.run is not None:
+            wandb.log(logging_output)
 
         return loss, sample_size, logging_output
 
@@ -144,8 +164,9 @@ class RLCriterion(FairseqCriterion):
 
         log_probs = torch.gather(torch.log(probs), -1, sample_idx.unsqueeze(1))
         loss = -log_probs * rewards
+        loss, rewards = loss.mean(), rewards.mean()
 
-        return loss.mean(), rewards.mean()
+        return loss, rewards
 
     @staticmethod
     def reduce_metrics(logging_outputs) -> None:

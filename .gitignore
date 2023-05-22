@@ -2,4 +2,13 @@ __pycache__/
 *.py[cod]
 .idea/
 
+data/
+models/
+outputs
+wandb/
+logs/
+
 *.txt
+.python-version
+.vscode
+pyrightconfig.json

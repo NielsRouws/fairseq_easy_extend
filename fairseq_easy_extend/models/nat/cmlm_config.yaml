@@ -1,12 +1,13 @@
 # @package _group_
 task:
   _name: translation_lev
-  data: ??? # path to data directory
+  data: # /home/admin/Projects/University/NLP2/data/iwslt14.tokenized.de-en # path to data directory
   source_lang: de
   target_lang: en
   noise: random_mask
 criterion:
-  _name: nat_loss
+  _name: rl_loss # nat_loss
+  sentence_level_metric: bleu 
 model:
   _name: cmlm_transformer_base
   share_decoder_input_output_embed: true

@@ -49,9 +49,10 @@ class RLCriterion(FairseqCriterion):
 
         self.bleu = BLEU(effective_order=True)
         self.chrf = CHRF()
-        self.bert = BERTScorer(lang="en", rescale_with_baseline=True).score
 
-        if self.metric == "comet":
+        if self.metric == "bert":
+            self.bert = BERTScorer(lang="en", rescale_with_baseline=True).score
+        elif self.metric == "comet":
             self.comet = load_from_checkpoint(
                 download_model("Unbabel/wmt22-comet-da")
             ).predict
@@ -142,30 +143,42 @@ class RLCriterion(FairseqCriterion):
         vocab_size = outputs.size(2)
 
         probs = F.softmax(outputs, dim=-1)
-        sample_idx = torch.multinomial(
-            probs.view(-1, vocab_size), 1, replacement=True
-        ).view(bsz, seq_len)
-
-        rewards = []
-        snts = []
-        tgts = []
-        data = []
 
         with torch.no_grad():
+            sample_idx = torch.multinomial(
+                probs.view(-1, vocab_size), 1, replacement=True
+            ).view(bsz, seq_len)
+
+            rewards = []
+            snts = []
+            tgts = []
+            data = []
+
             for idx in range(bsz):
-                if masks is not None:
-                    mask = masks[idx]
-                    sample_sentence = self.decode((sample_idx[idx] * mask).unsqueeze(0))
-                    target_sentence = self.decode((targets[idx] * mask).unsqueeze(0))
-                else:
-                    sample_sentence = self.decode(sample_idx[idx])
-                    target_sentence = self.decode(targets[idx])
+                # if masks is not None:
+                #     mask = masks[idx]
+                #     sample_sentence = self.decode((sample_idx[idx] * mask).unsqueeze(0))
+                #     target_sentence = self.decode((targets[idx] * mask).unsqueeze(0))
+                # else:
+                sample_sentence = self.decode(sample_idx[idx])
+                target_sentence = self.decode(targets[idx])
+
+                # if masks is not None:
+                #     mask = masks[idx]
+                #     sample_sentence = self.decode(sample_idx[[idx], mask])
+                #     target_sentence = self.decode(targets[[idx], mask])
+                # else:
+                #     sample_sentence = self.decode(sample_idx[[idx], :])
+                #     target_sentence = self.decode(targets[[idx], :])
 
                 if self.metric == "bleu":
                     rewards.append(
-                        self.bleu.sentence_score(
-                            sample_sentence, [target_sentence]
-                        ).score
+                        [
+                            self.bleu.sentence_score(
+                                sample_sentence, [target_sentence]
+                            ).score
+                        ]
+                        * seq_len
                     )
                 elif self.metric == "chrf":
                     rewards.append(
@@ -206,15 +219,19 @@ class RLCriterion(FairseqCriterion):
         # elif self.metric == "bleurt":
         # rewards = self.bleurt(references=data[0], candidates=data[1])[0]
 
-        rewards = (torch.ones((seq_len, bsz)) * torch.Tensor(rewards)).T.to(
-            outputs.device
-        )
+        # rewards = (torch.ones((seq_len, bsz)) * torch.Tensor(rewards)).T.to(
+        #     outputs.device
+        # )
+        #
+        rewards = torch.Tensor(rewards).to(outputs.device)
 
         if masks is not None:
             probs, targets = probs[masks], targets[masks]
             rewards, sample_idx = rewards[masks], sample_idx[masks]
 
-        log_probs = torch.gather(torch.log(probs), -1, sample_idx.unsqueeze(1))
+        log_probs = torch.gather(
+            torch.log(probs), -1, sample_idx.unsqueeze(1)
+        ).squeeze()
         loss = -log_probs * rewards
         loss, rewards = loss.mean(), rewards.mean()
 

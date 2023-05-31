@@ -14,7 +14,10 @@ from dataclasses import dataclass, field
 
 from fairseq.logging import metrics
 
-from sacrebleu.metrics import BLEU
+from sacrebleu.metrics import BLEU, CHRF
+from bert_score import BERTScorer
+
+from comet import download_model, load_from_checkpoint
 
 import wandb
 
@@ -42,8 +45,16 @@ class RLCriterion(FairseqCriterion):
         self.metric = sentence_level_metric
         self.tokenizer = encoders.build_tokenizer(Namespace(tokenizer="moses"))
         self.tgt_dict = task.target_dictionary
+        self.src_dict = task.source_dictionary
 
         self.bleu = BLEU(effective_order=True)
+        self.chrf = CHRF()
+        self.bert = BERTScorer(lang="en", rescale_with_baseline=True).score
+
+        if self.metric == "comet":
+            self.comet = load_from_checkpoint(
+                download_model("Unbabel/wmt22-comet-da")
+            ).predict
 
         self.run = (
             wandb.init(project=wandb_project, entity=wandb_entity)
@@ -72,7 +83,7 @@ class RLCriterion(FairseqCriterion):
         outs = outputs["word_ins"].get("out", None)
         masks = outputs["word_ins"].get("mask", None)
 
-        loss, reward = self._compute_loss(outs, tgt_tokens, masks)
+        loss, reward = self._compute_loss(outs, tgt_tokens, src_tokens, masks)
 
         # NOTE:
         # we don't need to use sample_size as denominator for the gradient
@@ -119,10 +130,11 @@ class RLCriterion(FairseqCriterion):
         """
         pass
 
-    def _compute_loss(self, outputs, targets, masks=None):
+    def _compute_loss(self, outputs, targets, sources, masks=None):
         """
         outputs: batch x len x d_model
         targets: batch x len
+        sources: batch x len
         masks:   batch x len
         """
         bsz = outputs.size(0)
@@ -135,24 +147,64 @@ class RLCriterion(FairseqCriterion):
         ).view(bsz, seq_len)
 
         rewards = []
+        snts = []
+        tgts = []
+        data = []
+
         with torch.no_grad():
             for idx in range(bsz):
                 if masks is not None:
                     mask = masks[idx]
-                    sample_sentence = self.decode(sample_idx[[idx], mask])
-                    target_sentence = self.decode(targets[[idx], mask])
+                    sample_sentence = self.decode((sample_idx[idx] * mask).unsqueeze(0))
+                    target_sentence = self.decode((targets[idx] * mask).unsqueeze(0))
                 else:
-                    sample_sentence = self.decode(sample_idx[[idx], :])
-                    target_sentence = self.decode(targets[[idx], :])
+                    sample_sentence = self.decode(sample_idx[idx])
+                    target_sentence = self.decode(targets[idx])
 
                 if self.metric == "bleu":
-                    reward = self.bleu.sentence_score(
-                        sample_sentence, [target_sentence]
-                    ).score
+                    rewards.append(
+                        self.bleu.sentence_score(
+                            sample_sentence, [target_sentence]
+                        ).score
+                    )
+                elif self.metric == "chrf":
+                    rewards.append(
+                        self.chrf.sentence_score(
+                            sample_sentence, [target_sentence]
+                        ).score
+                    )
+                elif self.metric == "bert":
+                    tgts.append(target_sentence)
+                    snts.append(sample_sentence)
+                # elif self.metric == "bleurt":
+                # tgts[0].append(target_sentence)
+                # snts[1].append(sample_sentence)
+                elif self.metric == "comet":
+                    # copy paste of decode but using src_dict this time
+                    source_sentence = self.src_dict.string(
+                        sources[[idx], :].int().cpu(), "@@ ", "UNKNOWNTOKENINHYP"
+                    )
+                    # no idea if our tokenizer works on this
+                    source_sentence = self.tokenizer.decode(source_sentence)
+
+                    data.append(
+                        {
+                            "src": source_sentence,
+                            "mt": sample_sentence,
+                            "ref": target_sentence,
+                        }
+                    )
+                elif self.metric == "constant":
+                    rewards.append(1)
                 else:
                     raise ValueError("invalid metric")
 
-                rewards.append(reward)
+        if self.metric == "bert":
+            rewards = self.bert(tgts, snts)[2]
+        elif self.metric == "comet":
+            rewards = self.comet(data, progress_bar=False).scores
+        # elif self.metric == "bleurt":
+        # rewards = self.bleurt(references=data[0], candidates=data[1])[0]
 
         rewards = (torch.ones((seq_len, bsz)) * torch.Tensor(rewards)).T.to(
             outputs.device

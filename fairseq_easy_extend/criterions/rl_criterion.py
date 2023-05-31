@@ -200,7 +200,7 @@ class RLCriterion(FairseqCriterion):
                         }
                     )
                 elif self.metric == "constant":
-                    rewards.append(1)
+                    rewards.append([1.0] * seq_len)
                 else:
                     raise ValueError("invalid metric")
 

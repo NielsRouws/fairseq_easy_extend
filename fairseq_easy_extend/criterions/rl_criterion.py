@@ -163,14 +163,6 @@ class RLCriterion(FairseqCriterion):
                 sample_sentence = self.decode(sample_idx[idx])
                 target_sentence = self.decode(targets[idx])
 
-                # if masks is not None:
-                #     mask = masks[idx]
-                #     sample_sentence = self.decode(sample_idx[[idx], mask])
-                #     target_sentence = self.decode(targets[[idx], mask])
-                # else:
-                #     sample_sentence = self.decode(sample_idx[[idx], :])
-                #     target_sentence = self.decode(targets[[idx], :])
-
                 if self.metric == "bleu":
                     rewards.append(
                         [
@@ -182,16 +174,16 @@ class RLCriterion(FairseqCriterion):
                     )
                 elif self.metric == "chrf":
                     rewards.append(
-                        self.chrf.sentence_score(
-                            sample_sentence, [target_sentence]
-                        ).score
+                        [
+                            self.chrf.sentence_score(
+                                sample_sentence, [target_sentence]
+                            ).score
+                        ]
+                        * seq_len
                     )
                 elif self.metric == "bert":
                     tgts.append(target_sentence)
                     snts.append(sample_sentence)
-                # elif self.metric == "bleurt":
-                # tgts[0].append(target_sentence)
-                # snts[1].append(sample_sentence)
                 elif self.metric == "comet":
                     # copy paste of decode but using src_dict this time
                     source_sentence = self.src_dict.string(
@@ -212,10 +204,14 @@ class RLCriterion(FairseqCriterion):
                 else:
                     raise ValueError("invalid metric")
 
+        # TODO: fix bert and comet reward final shape etc.
         if self.metric == "bert":
             rewards = self.bert(tgts, snts)[2]
         elif self.metric == "comet":
             rewards = self.comet(data, progress_bar=False).scores
+        else:
+            rewards = torch.Tensor(rewards).to(outputs.device)
+
         # elif self.metric == "bleurt":
         # rewards = self.bleurt(references=data[0], candidates=data[1])[0]
 
@@ -223,7 +219,6 @@ class RLCriterion(FairseqCriterion):
         #     outputs.device
         # )
         #
-        rewards = torch.Tensor(rewards).to(outputs.device)
 
         if masks is not None:
             probs, targets = probs[masks], targets[masks]

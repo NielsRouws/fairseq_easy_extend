@@ -7,7 +7,7 @@ task:
   noise: random_mask
 criterion:
   _name: rl_loss # nat_loss
-  sentence_level_metric: comet
+  sentence_level_metric: constant
   wandb_entity: ingur                             # optional  
   wandb_project: nlp_machine_translation_nar_rl   # optional
 model:
@@ -31,9 +31,9 @@ dataset:
   max_tokens: 8192
   validate_interval_updates: 1000
 optimization:
-  lr: [0.0005]
+  lr: [0.0001]
   update_freq: [8]
-  max_update: 730
+  max_update: 146
   stop_min_lr: 1e-09
 checkpoint:
   no_epoch_checkpoints: true

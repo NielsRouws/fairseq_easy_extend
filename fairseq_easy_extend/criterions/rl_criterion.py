@@ -63,6 +63,10 @@ class RLCriterion(FairseqCriterion):
             else None
         )
 
+        print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        print(f"Metric: {self.metric}, half learning rate, 2 epochs, no log_probs")
+        print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+
     def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
         Returns a tuple with three elements:
@@ -142,16 +146,16 @@ class RLCriterion(FairseqCriterion):
         seq_len = outputs.size(1)
         vocab_size = outputs.size(2)
 
-        # probs = F.softmax(outputs, dim=-1)
-        log_probs = F.log_softmax(outputs, dim=-1)
+        probs = F.softmax(outputs, dim=-1)
+        # log_probs = F.log_softmax(outputs, dim=-1)
 
         with torch.no_grad():
-            # sample_idx = torch.multinomial(
-            #     probs.view(-1, vocab_size), 1, replacement=True
-            # ).view(bsz, seq_len)
             sample_idx = torch.multinomial(
-                torch.exp(log_probs.view(-1, vocab_size)), 1, replacement=True
+                probs.view(-1, vocab_size), 1, replacement=True
             ).view(bsz, seq_len)
+            # sample_idx = torch.multinomial(
+            #     torch.exp(log_probs.view(-1, vocab_size)), 1, replacement=True
+            # ).view(bsz, seq_len)
 
             rewards = []
             snts = []
@@ -160,12 +164,19 @@ class RLCriterion(FairseqCriterion):
 
             for idx in range(bsz):
                 # if masks is not None:
-                #     mask = masks[idx]
-                #     sample_sentence = self.decode((sample_idx[idx] * mask).unsqueeze(0))
-                #     target_sentence = self.decode((targets[idx] * mask).unsqueeze(0))
+                mask = masks[idx]
+                sample_sentence = self.decode((sample_idx[idx] * mask).unsqueeze(0))
+                target_sentence = self.decode((targets[idx] * mask).unsqueeze(0))
                 # else:
-                sample_sentence = self.decode(sample_idx[idx])
-                target_sentence = self.decode(targets[idx])
+                # sample_sentence = self.decode(sample_idx[idx])
+                # target_sentence = self.decode(targets[idx])
+                # sample_sentence = self.detokenizer.detokenize(
+                #     self.tgt_dict.string(sample_idx[idx]).split(), return_str=True
+                # )
+                #
+                # target_sentence = self.detokenizer.detokenize(
+                #     self.tgt_dict.string(targets[idx]).split(), return_str=True
+                # )
 
                 if self.metric == "bleu":
                     rewards.append(
@@ -219,14 +230,14 @@ class RLCriterion(FairseqCriterion):
         rewards = torch.Tensor(rewards).to(outputs.device)
 
         if masks is not None:
-            # probs, targets = probs[masks], targets[masks]
-            log_probs, targets = log_probs[masks], targets[masks]
+            probs, targets = probs[masks], targets[masks]
+            # log_probs, targets = log_probs[masks], targets[masks]
             rewards, sample_idx = rewards[masks], sample_idx[masks]
 
-        # log_probs = torch.gather(
-        #     torch.log(probs), -1, sample_idx.unsqueeze(1)
-        # ).squeeze()
-        log_probs = torch.gather(log_probs, -1, sample_idx.unsqueeze(1)).squeeze()
+        log_probs = torch.gather(
+            torch.log(probs), -1, sample_idx.unsqueeze(1)
+        ).squeeze()
+        # log_probs = torch.gather(log_probs, -1, sample_idx.unsqueeze(1)).squeeze()
         loss = -log_probs * rewards
         loss, rewards = loss.mean(), rewards.mean()
 

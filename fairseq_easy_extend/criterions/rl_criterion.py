@@ -210,21 +210,13 @@ class RLCriterion(FairseqCriterion):
 
         # TODO: fix bert and comet reward final shape etc.
         if self.metric == "bert":
-            rewards = self.bert(tgts, snts)[2]
+            rewards = self.bert(snts, tgts)[2]
             rewards = [[score] * seq_len for score in rewards]
         elif self.metric == "comet":
             rewards = self.comet(data, progress_bar=False).scores
             rewards = [[score] * seq_len for score in rewards]
 
         rewards = torch.Tensor(rewards).to(outputs.device)
-
-        # elif self.metric == "bleurt":
-        # rewards = self.bleurt(references=data[0], candidates=data[1])[0]
-
-        # rewards = (torch.ones((seq_len, bsz)) * torch.Tensor(rewards)).T.to(
-        #     outputs.device
-        # )
-        #
 
         if masks is not None:
             # probs, targets = probs[masks], targets[masks]
